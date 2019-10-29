@@ -38,6 +38,78 @@ func NewAuthMiddleware() *authMiddleware {
 type authMiddleware struct {
 }
 
+// newSecurityMiddleware based on auth configuration returns SecurityHandler or just
+func newSecurityMiddleware(authenticators map[string]auth.Authenticator) func(next http.HandlerFunc) http.HandlerFunc {
+	if auth.Enabled() {
+		return func(next http.HandlerFunc) http.HandlerFunc {
+			return SecurityHandler(authenticators, next)
+		}
+	}
+
+	return func(next http.HandlerFunc) http.HandlerFunc {
+		return next
+	}
+}
+
+// SecurityHandler implements Authentication and Authorization check at the same time
+// this functionality where not moved to separate functions because of simplicity
+func SecurityHandler(authenticators map[string]auth.Authenticator, next http.HandlerFunc) http.HandlerFunc {
+	if authenticators == nil {
+		return next
+	}
+
+	return func(w http.ResponseWriter, r *http.Request) {
+
+		tokenHeader := r.Header.Get("Authorization")
+		tokens := strings.Split(tokenHeader, " ")
+
+		if len(tokens) < 2 {
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+		token := tokens[1]
+
+		// Determine issuer
+		issuer, err := auth.TokenIssuer(token)
+		if err != nil {
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+
+		// Use http.Request context for cancellation propagation
+		ctx := r.Context()
+
+		// Authenticate user
+		var claims *auth.Claims
+		if authenticator, exists := authenticators[issuer]; exists {
+			claims, err = authenticator.AuthenticateToken(ctx, token)
+			if err != nil || claims == nil {
+				w.WriteHeader(http.StatusForbidden)
+				return
+			}
+		} else {
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+
+		isSystemAdmin := false
+
+		for _, role := range claims.Roles {
+			if role == "system.admin" {
+				isSystemAdmin = true
+				break
+			}
+		}
+
+		if !isSystemAdmin {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	}
+}
+
 func (a *authMiddleware) createWithAuth(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
 	fn := "create"
 	_, authRequired := a.isTokenProcessingRequired(r)
