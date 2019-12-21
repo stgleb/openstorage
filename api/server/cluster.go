@@ -953,6 +953,7 @@ func (c *clusterApi) Routes() []*Route {
 	}
 }
 
+// TODO(stgleb): Remove methods that are need for preserving cluster state from this list e.g peerstatus
 func (c *clusterApi) SecureRoutes() []*Route {
 	return []*Route{
 		{verb: http.MethodGet, path: clusterPath("/enumerate", cluster.APIVersion), fn: c.enumerate},
