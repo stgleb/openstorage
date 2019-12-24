@@ -35,11 +35,30 @@ func newClusterAPI() restServer {
 }
 
 func (c *clusterApi) SetupRoutesWithAuth(router *mux.Router, authenticators map[string]auth.Authenticator) (*mux.Router, error) {
-	routes := c.SecureRoutes()
+	secureRoutes := c.SecureRoutes()
+	nonSecureRoutes := c.Routes()
+
+	routeMap := make(map[string]*Route)
+
+	// fill map with non-secure routes
+	for _, route := range nonSecureRoutes {
+		routeMap[route.GetPath() + route.GetVerb()] = route
+	}
+
+	// Remove routes that shall not be secured
+	for _, route := range secureRoutes {
+		delete(routeMap, route.GetPath() + route.GetVerb())
+	}
+	
 	securityMiddleware := newSecurityMiddleware(authenticators)
 
-	for _, route := range routes {
+	for _, route := range secureRoutes {
 		router.Methods(route.GetVerb()).Path(route.GetPath()).HandlerFunc(securityMiddleware(route.fn))
+	}
+
+	// Put all non-secured routes on router
+	for _, route := range routeMap {
+		router.Methods(route.GetVerb()).Path(route.GetPath()).HandlerFunc(route.GetFn())
 	}
 
 	return router, nil
@@ -956,14 +975,6 @@ func (c *clusterApi) Routes() []*Route {
 // TODO(stgleb): Remove methods that are need for preserving cluster state from this list e.g peerstatus
 func (c *clusterApi) SecureRoutes() []*Route {
 	return []*Route{
-		{verb: http.MethodGet, path: clusterPath("/enumerate", cluster.APIVersion), fn: c.enumerate},
-		{verb: http.MethodGet, path: clusterPath("/gossipstate", cluster.APIVersion), fn: c.gossipState},
-		{verb: http.MethodGet, path: clusterPath("/nodestatus", cluster.APIVersion), fn: c.nodeStatus},
-		{verb: http.MethodGet, path: clusterPath("/nodehealth", cluster.APIVersion), fn: c.nodeHealth},
-		{verb: http.MethodGet, path: clusterPath("/status", cluster.APIVersion), fn: c.status},
-		{verb: http.MethodGet, path: clusterPath("/peerstatus", cluster.APIVersion), fn: c.peerStatus},
-		{verb: http.MethodGet, path: clusterPath("/inspect/{id}", cluster.APIVersion), fn: c.inspect},
-
 		{verb: http.MethodDelete, path: clusterPath("", cluster.APIVersion), fn: c.delete},
 		{verb: http.MethodDelete, path: clusterPath("/{id}", cluster.APIVersion), fn: c.delete},
 
